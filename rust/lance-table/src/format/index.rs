@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use deepsize::DeepSizeOf;
 use roaring::RoaringBitmap;
 use snafu::location;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::pb;
@@ -45,6 +46,14 @@ pub struct Index {
     /// This field is optional for backward compatibility. For existing indices created before
     /// this field was added, this will be None.
     pub created_at: Option<DateTime<Utc>>,
+
+    /// Map of index file names to their sizes in bytes.
+    ///
+    /// This is used to optimize index opening by avoiding HEAD requests to get file sizes.
+    /// The key is the relative file name (e.g., "index.idx", "auxiliary.idx") and the value
+    /// is the file size in bytes. When this is missing or empty, file sizes will be
+    /// determined by querying the object store.
+    pub index_file_sizes: HashMap<String, u64>,
 }
 
 impl DeepSizeOf for Index {
@@ -58,6 +67,7 @@ impl DeepSizeOf for Index {
                 .as_ref()
                 .map(|fragment_bitmap| fragment_bitmap.serialized_size())
                 .unwrap_or(0)
+            + self.index_file_sizes.deep_size_of_children(context)
     }
 }
 
@@ -90,6 +100,7 @@ impl TryFrom<pb::IndexMetadata> for Index {
                 DateTime::from_timestamp_millis(ts as i64)
                     .expect("Invalid timestamp in index metadata")
             }),
+            index_file_sizes: proto.index_file_sizes,
         })
     }
 }
@@ -115,6 +126,7 @@ impl From<&Index> for pb::IndexMetadata {
             index_details: idx.index_details.clone(),
             index_version: Some(idx.index_version),
             created_at: idx.created_at.map(|dt| dt.timestamp_millis() as u64),
+            index_file_sizes: idx.index_file_sizes.clone(),
         }
     }
 }

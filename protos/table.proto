@@ -203,6 +203,14 @@ message IndexMetadata {
   /// This field is optional for backward compatibility. For existing indices created before
   /// this field was added, this will be None/null.
   optional uint64 created_at = 8;
+
+  /// Map of index file names to their sizes in bytes.
+  ///
+  /// This is used to optimize index opening by avoiding HEAD requests to get file sizes.
+  /// The key is the relative file name (e.g., "index.idx", "auxiliary.idx") and the value
+  /// is the file size in bytes. When this is missing or empty, file sizes will be
+  /// determined by querying the object store.
+  map<string, uint64> index_file_sizes = 9;
 }
 
 // Index Section, containing a list of index metadata for one dataset version.

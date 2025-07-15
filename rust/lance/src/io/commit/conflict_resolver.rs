@@ -4,19 +4,19 @@
 use crate::index::frag_reuse::{build_frag_reuse_index_metadata, load_frag_reuse_index_details};
 use crate::io::deletion::read_dataset_deletion_file;
 use crate::{
-    dataset::transaction::{Operation, Transaction},
     Dataset,
+    dataset::transaction::{Operation, Transaction},
 };
 use futures::{StreamExt, TryStreamExt};
 use lance_core::{
-    utils::{deletion::DeletionVector, mask::RowIdTreeMap},
     Error, Result,
+    utils::{deletion::DeletionVector, mask::RowIdTreeMap},
 };
 use lance_index::frag_reuse::FRAG_REUSE_INDEX_NAME;
 use lance_index::mem_wal::MemWal;
 use lance_table::format::Index;
 use lance_table::{format::Fragment, io::deletion::write_deletion_file};
-use snafu::{location, Location};
+use snafu::{Location, location};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -1928,7 +1928,7 @@ mod tests {
 
     #[test]
     fn test_conflicts() {
-        use io::commit::conflict_resolver::tests::{modified_fragment_ids, ConflictResult::*};
+        use io::commit::conflict_resolver::tests::{ConflictResult::*, modified_fragment_ids};
 
         let index0 = Index {
             uuid: uuid::Uuid::new_v4(),
@@ -1939,6 +1939,7 @@ mod tests {
             index_details: None,
             index_version: 0,
             created_at: None, // Test index, not setting timestamp
+            index_file_sizes: HashMap::new(),
         };
         let fragment0 = Fragment::new(0);
         let fragment1 = Fragment::new(1);

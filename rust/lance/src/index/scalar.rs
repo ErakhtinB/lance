@@ -4,42 +4,43 @@
 //! Utilities for integrating scalar indices with datasets
 //!
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::index::DatasetIndexInternalExt;
 use crate::session::Session;
 use crate::{
-    dataset::{index::LanceIndexStoreExt, scanner::ColumnOrdering},
     Dataset,
+    dataset::{index::LanceIndexStoreExt, scanner::ColumnOrdering},
 };
 use arrow_schema::DataType;
 use async_trait::async_trait;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::SendableRecordBatchStream;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use futures::TryStreamExt;
 use lance_core::datatypes::Field;
 use lance_core::{Error, Result};
 use lance_datafusion::{chunker::chunk_concat_stream, exec::LanceExecutionOptions};
+use lance_index::ScalarIndexCriteria;
 use lance_index::metrics::MetricsCollector;
 use lance_index::scalar::{
     btree::DEFAULT_BTREE_BATCH_SIZE, inverted::tokenizer::InvertedIndexParams,
 };
 use lance_index::scalar::{
     inverted::METADATA_FILE,
-    ngram::{train_ngram_index, NGramIndex},
+    ngram::{NGramIndex, train_ngram_index},
 };
-use lance_index::ScalarIndexCriteria;
 use lance_index::{
-    scalar::{
-        bitmap::{train_bitmap_index, BitmapIndex, BITMAP_LOOKUP_NAME},
-        btree::{train_btree_index, BTreeIndex, TrainingSource},
-        flat::FlatIndexMetadata,
-        inverted::{train_inverted_index, InvertedIndex, INVERT_LIST_FILE},
-        label_list::{train_label_list_index, LabelListIndex},
-        lance_format::LanceIndexStore,
-        ScalarIndex, ScalarIndexParams, ScalarIndexType,
-    },
     IndexType,
+    scalar::{
+        ScalarIndex, ScalarIndexParams, ScalarIndexType,
+        bitmap::{BITMAP_LOOKUP_NAME, BitmapIndex, train_bitmap_index},
+        btree::{BTreeIndex, TrainingSource, train_btree_index},
+        flat::FlatIndexMetadata,
+        inverted::{INVERT_LIST_FILE, InvertedIndex, train_inverted_index},
+        label_list::{LabelListIndex, train_label_list_index},
+        lance_format::LanceIndexStore,
+    },
 };
 use lance_table::format::Index;
 use log::info;
@@ -586,6 +587,7 @@ mod tests {
             index_details,
             index_version: 0,
             created_at: None,
+            index_file_sizes: HashMap::new(),
         }
     }
 

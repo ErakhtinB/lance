@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright The Lance Authors
 
-use crate::dataset::optimize::remapping::transpose_row_ids_from_digest;
 use crate::Dataset;
+use crate::dataset::optimize::remapping::transpose_row_ids_from_digest;
 use lance_core::Error;
-use lance_index::frag_reuse::{
-    FragReuseGroup, FragReuseIndex, FragReuseIndexDetails, FragReuseVersion,
-    FRAG_REUSE_DETAILS_FILE_NAME, FRAG_REUSE_INDEX_NAME,
-};
 use lance_index::DatasetIndexExt;
+use lance_index::frag_reuse::{
+    FRAG_REUSE_DETAILS_FILE_NAME, FRAG_REUSE_INDEX_NAME, FragReuseGroup, FragReuseIndex,
+    FragReuseIndexDetails, FragReuseVersion,
+};
+use lance_table::format::Index;
 use lance_table::format::pb::fragment_reuse_index_details::{Content, InlineContent};
 use lance_table::format::pb::{ExternalFile, FragmentReuseIndexDetails};
-use lance_table::format::Index;
 use prost::Message;
 use roaring::{RoaringBitmap, RoaringTreemap};
 use snafu::location;
@@ -174,5 +174,6 @@ pub(crate) async fn build_frag_reuse_index_metadata(
         index_details: Some(prost_types::Any::from_msg(&proto)?),
         index_version: index_meta.map_or(0, |index_meta| index_meta.index_version),
         created_at: Some(chrono::Utc::now()),
+        index_file_sizes: HashMap::new(),
     })
 }

@@ -283,7 +283,7 @@ pub(crate) async fn build_vector_index(
     uuid: &str,
     params: &VectorIndexParams,
     fri: Option<Arc<FragReuseIndex>>,
-) -> Result<()> {
+) -> Result<HashMap<String, u64>> {
     let stages = &params.stages;
 
     if stages.is_empty() {
@@ -364,7 +364,7 @@ pub(crate) async fn build_vector_index(
 
         match params.version {
             IndexFileVersion::Legacy => {
-                build_ivf_pq_index(
+                return build_ivf_pq_index(
                     dataset,
                     column,
                     name,
@@ -373,7 +373,7 @@ pub(crate) async fn build_vector_index(
                     ivf_params,
                     pq_params,
                 )
-                .await?;
+                .await;
             }
             IndexFileVersion::V3 => {
                 IvfIndexBuilder::<FlatIndex, ProductQuantizer>::new(
@@ -484,7 +484,9 @@ pub(crate) async fn build_vector_index(
         });
     }
 
-    Ok(())
+    // For V3 indices and other cases, we'll need to get file sizes differently
+    // For now, return empty HashMap until we implement that
+    Ok(HashMap::new())
 }
 
 #[instrument(level = "debug", skip_all, fields(old_uuid = old_uuid.to_string(), new_uuid = new_uuid.to_string(), num_rows = mapping.len()))]
@@ -609,6 +611,7 @@ pub(crate) async fn open_vector_index_v2(
     uuid: &str,
     reader: FileReader,
     fri: Option<Arc<FragReuseIndex>>,
+    lance_index_metadata: Option<&IndexMetadata>,
 ) -> Result<Arc<dyn VectorIndex>> {
     let index_metadata = reader
         .schema()
@@ -627,7 +630,18 @@ pub(crate) async fn open_vector_index_v2(
                 .indices_dir()
                 .child(uuid)
                 .child(INDEX_AUXILIARY_FILE_NAME);
-            let aux_reader = dataset.object_store().open(&aux_path).await?;
+            let aux_reader = if let Some(metadata) = lance_index_metadata {
+                if let Some(&file_size) = metadata.index_file_sizes.get(INDEX_AUXILIARY_FILE_NAME) {
+                    // Use cached file size to avoid HEAD request
+                    dataset.object_store().open_with_size(&aux_path, file_size as usize).await?
+                } else {
+                    // Fallback to normal open if no cached file size
+                    dataset.object_store().open(&aux_path).await?
+                }
+            } else {
+                // Fallback to normal open if no metadata
+                dataset.object_store().open(&aux_path).await?
+            };
 
             let ivf_data = IvfModel::load(&reader).await?;
             let options = HNSWIndexOptions { use_residual: true };
@@ -655,7 +669,18 @@ pub(crate) async fn open_vector_index_v2(
                 .indices_dir()
                 .child(uuid)
                 .child(INDEX_AUXILIARY_FILE_NAME);
-            let aux_reader = dataset.object_store().open(&aux_path).await?;
+            let aux_reader = if let Some(metadata) = lance_index_metadata {
+                if let Some(&file_size) = metadata.index_file_sizes.get(INDEX_AUXILIARY_FILE_NAME) {
+                    // Use cached file size to avoid HEAD request
+                    dataset.object_store().open_with_size(&aux_path, file_size as usize).await?
+                } else {
+                    // Fallback to normal open if no cached file size
+                    dataset.object_store().open(&aux_path).await?
+                }
+            } else {
+                // Fallback to normal open if no metadata
+                dataset.object_store().open(&aux_path).await?
+            };
 
             let ivf_data = IvfModel::load(&reader).await?;
             let options = HNSWIndexOptions {

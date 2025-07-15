@@ -306,6 +306,7 @@ impl DatasetIndexExt for Dataset {
         }
 
         let index_id = Uuid::new_v4();
+        let mut file_sizes = HashMap::new();
         let index_details = match (index_type, params.index_name()) {
             (
                 IndexType::Bitmap
@@ -353,7 +354,7 @@ impl DatasetIndexExt for Dataset {
                     })?;
 
                 // this is a large future so move it to heap
-                Box::pin(build_vector_index(
+                file_sizes = Box::pin(build_vector_index(
                     self,
                     column,
                     &index_name,
@@ -416,6 +417,7 @@ impl DatasetIndexExt for Dataset {
             index_details: Some(index_details),
             index_version: index_type.version(),
             created_at: Some(chrono::Utc::now()),
+            index_file_sizes: file_sizes,
         };
         let transaction = Transaction::new(
             self.manifest.version,
@@ -567,6 +569,7 @@ impl DatasetIndexExt for Dataset {
             index_details: None,
             index_version: 0,
             created_at: Some(chrono::Utc::now()),
+            index_file_sizes: HashMap::new(),
         };
 
         let transaction = Transaction::new(
@@ -666,6 +669,7 @@ impl DatasetIndexExt for Dataset {
                 index_details: last_idx.index_details.clone(),
                 index_version: res.new_index_version,
                 created_at: Some(chrono::Utc::now()),
+                index_file_sizes: last_idx.index_file_sizes.clone(),
             };
             removed_indices.extend(res.removed_indices.iter().map(|&idx| idx.clone()));
             if deltas.len() > removed_indices.len() {
@@ -999,7 +1003,24 @@ impl DatasetIndexInternalExt for Dataset {
         let fri = self.open_frag_reuse_index(metrics).await?;
         let index_dir = self.indices_dir().child(uuid);
         let index_file = index_dir.child(INDEX_FILE_NAME);
-        let reader: Arc<dyn Reader> = self.object_store.open(&index_file).await?.into();
+
+        // Try to get the index metadata to use cached file sizes
+        let index_metadata = self.load_index(uuid).await?;
+        let reader: Arc<dyn Reader> = if let Some(metadata) = &index_metadata {
+            if let Some(&file_size) = metadata.index_file_sizes.get(INDEX_FILE_NAME) {
+                // Use cached file size to avoid HEAD request
+                self.object_store
+                    .open_with_size(&index_file, file_size as usize)
+                    .await?
+                    .into()
+            } else {
+                // Fallback to normal open if no cached file size
+                self.object_store.open(&index_file).await?.into()
+            }
+        } else {
+            // Fallback to normal open if no metadata found
+            self.object_store.open(&index_file).await?.into()
+        };
 
         let tailing_bytes = read_last_block(reader.as_ref()).await?;
         let (major_version, minor_version) = read_version(&tailing_bytes)?;
@@ -1029,8 +1050,15 @@ impl DatasetIndexInternalExt for Dataset {
                     Some(&self.metadata_cache.file_metadata_cache(&index_file)),
                 )
                 .await?;
-                vector::open_vector_index_v2(Arc::new(self.clone()), column, uuid, reader, fri)
-                    .await
+                vector::open_vector_index_v2(
+                    Arc::new(self.clone()),
+                    column,
+                    uuid,
+                    reader,
+                    fri,
+                    index_metadata.as_ref(),
+                )
+                .await
             }
 
             (0, 3) => {

@@ -1315,7 +1315,7 @@ pub async fn build_ivf_pq_index(
     metric_type: MetricType,
     ivf_params: &IvfBuildParams,
     pq_params: &PQBuildParams,
-) -> Result<()> {
+) -> Result<HashMap<String, u64>> {
     let (ivf_model, pq) =
         build_ivf_model_and_pq(dataset, column, metric_type, ivf_params, pq_params).await?;
     let stream = scan_index_field_stream(dataset, column).await?;
@@ -1350,7 +1350,7 @@ pub async fn build_ivf_hnsw_pq_index(
     ivf_params: &IvfBuildParams,
     hnsw_params: &HnswBuildParams,
     pq_params: &PQBuildParams,
-) -> Result<()> {
+) -> Result<HashMap<String, u64>> {
     let (ivf_model, pq) =
         build_ivf_model_and_pq(dataset, column, metric_type, ivf_params, pq_params).await?;
     let stream = scan_index_field_stream(dataset, column).await?;
@@ -1533,7 +1533,7 @@ async fn write_ivf_pq_file(
     shuffle_partition_batches: usize,
     shuffle_partition_concurrency: usize,
     precomputed_shuffle_buffers: Option<(Path, Vec<String>)>,
-) -> Result<()> {
+) -> Result<HashMap<String, u64>> {
     let path = index_dir.child(uuid).child(INDEX_FILE_NAME);
     let mut writer = object_store.create(&path).await?;
 
@@ -1571,9 +1571,15 @@ async fn write_ivf_pq_file(
     // TODO: for now the IVF_PQ index file format hasn't been updated, so keep the old version,
     // change it to latest version value after refactoring the IVF_PQ
     writer.write_magics(pos, 0, 1, MAGIC).await?;
+    
+    // Get the file size before shutting down
+    let file_size = writer.tell().await?;
     writer.shutdown().await?;
 
-    Ok(())
+    // Return the file sizes
+    let mut file_sizes = HashMap::new();
+    file_sizes.insert(INDEX_FILE_NAME.to_string(), file_size as u64);
+    Ok(file_sizes)
 }
 
 pub async fn write_ivf_pq_file_from_existing_index(
@@ -1626,7 +1632,7 @@ async fn write_ivf_hnsw_file(
     shuffle_partition_batches: usize,
     shuffle_partition_concurrency: usize,
     precomputed_shuffle_buffers: Option<(Path, Vec<String>)>,
-) -> Result<()> {
+) -> Result<HashMap<String, u64>> {
     let object_store = dataset.object_store();
     let path = dataset.indices_dir().child(uuid).child(INDEX_FILE_NAME);
     let writer = object_store.create(&path).await?;
@@ -1727,12 +1733,22 @@ async fn write_ivf_hnsw_file(
     writer.add_metadata(IVF_PARTITION_KEY, &hnsw_metadata_json.to_string());
 
     ivf.write(&mut writer).await?;
+    
+    // Get file sizes before finishing
+    let main_file_size = writer.tell().await?;
+    let aux_file_size = aux_writer.tell().await?;
+    
     writer.finish().await?;
 
     // Write the aux file
     aux_ivf.write(&mut aux_writer).await?;
     aux_writer.finish().await?;
-    Ok(())
+    
+    // Return the file sizes
+    let mut file_sizes = HashMap::new();
+    file_sizes.insert(INDEX_FILE_NAME.to_string(), main_file_size as u64);
+    file_sizes.insert(INDEX_AUXILIARY_FILE_NAME.to_string(), aux_file_size as u64);
+    Ok(file_sizes)
 }
 
 async fn do_train_ivf_model<T: ArrowPrimitiveType>(
@@ -2269,6 +2285,7 @@ mod tests {
             index_details: Some(vector_index_details()),
             index_version: index.index_type().version(),
             created_at: None, // Test index, not setting timestamp
+            index_file_sizes: HashMap::new(),
         };
 
         let prefilter = Arc::new(DatasetPreFilter::new(dataset.clone(), &[index_meta], None));
